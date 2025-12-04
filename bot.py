@@ -12,7 +12,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # === Настройка Gemini (актуальная стабильная модель 2025) ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")  # ← Стабильная, бесплатная, мультимодальная
+model = genai.GenerativeModel("gemini-2.5-flash")  # ← Стабильная, бесплатная, мультимодальная (замена 1.5-flash)
 
 # === Бот ===
 bot = Bot(token=BOT_TOKEN)

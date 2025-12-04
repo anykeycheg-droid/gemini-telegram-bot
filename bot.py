@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 import google.generativeai as genai
-import requests  # Для API поиска
+import requests
 
 # === Конфиг ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -20,24 +20,23 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # === Память ===
-user_history = {}
+user_history = {}           # {user_id: [{"role": "user"/"model", "parts": [...]}, ...]}
 MAX_HISTORY = 30
 
-# === Функция поиска в Google ===
-def search_google(query, num=3):
+# === Поиск в Google ===
+def search_google(query: str, num: int = 3) -> str:
+    if not GOOGLE_SEARCH_API_KEY or not GOOGLE_CSE_ID:
+        return "Поиск отключён — нет ключей."
     url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "key": GOOGLE_SEARCH_API_KEY,
-        "cx": GOOGLE_CSE_ID,
-        "q": query,
-        "num": num
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        results = response.json().get("items", [])
-        snippets = [f"{item['title']}: {item['snippet']}" for item in results]
-        return "\n".join(snippets)
-    return "Поиск не удался — проверь ключи."
+    params = {"key": GOOGLE_SEARCH_API_KEY, "cx": GOOGLE_CSE_ID, "q": query, "num": num}
+    try:
+        r = requests.get(url, params=params, timeout=7)
+        if r.status_code == 200:
+            items = r.json().get("items", [])
+            return "\n\n".join([f"{i+1}. {item['title']}\n{item['snippet']}" for i, item in enumerate(items)])
+    except:
+        pass
+    return "Поиск временно недоступен."
 
 # === Хэндлеры ===
 @dp.message(Command("start"))
@@ -45,9 +44,11 @@ async def start(message: types.Message):
     user_id = message.from_user.id
     user_history[user_id] = []
     await message.answer(
-        "Привет! Я теперь с интернет-поиском 🌐\n"
-        "Пиши вопросы с '?' или 'поиск' — найду свежую инфу!\n"
-        "Фото тоже анализирую. /clear — очистить память"
+        "Привет! Я умный бот на Gemini 2.5 Flash 🧠\n"
+        "• Помню весь диалог\n"
+        "• Могу искать в интернете (вопросы с «?» и т.д.)\n"
+        "• Понимаю фото\n\n"
+        "Команды: /clear — очистить память"
     )
 
 @dp.message(Command("clear"))
@@ -64,24 +65,22 @@ async def chat(message: types.Message):
 
     await message.answer("Думаю...")
 
-    # Формируем контент
-    content = []
-    if message.text or message.caption:
-        user_query = message.text or message.caption
-        content.append(user_query)
+    user_text = message.text or message.caption or "Опиши это"
+    content = [user_text]
 
+    # Фото
     if message.photo:
         photo = message.photo[-1]
         file = await bot.get_file(photo.file_id)
         photo_bytes = await bot.download_file(file.file_path)
         content.append({"mime_type": "image/jpeg", "data": photo_bytes.read()})
 
-    # Проверяем, нужен ли поиск
-    search_results = ""
-    if "?" in user_query or any(word in user_query.lower() for word in ["поиск", "новости", "узнай", "кто выиграл", "что такое"]):
+    # Поиск в интернете
+    trigger_words = ["?", "поиск", "новости", "узнай", "кто", "что", "когда", "где", "сколько", "погода", "курс", "цена"]
+    if any(word in user_text.lower() for word in trigger_words):
         await message.answer("Ищу в интернете...")
-        search_results = search_google(user_query)
-        content.append(f"Свежие данные из поиска:\n{search_results}")
+        search_results = search_google(user_text)
+        content.append(f"Свежая информация из Google:\n{search_results}")
 
     # Добавляем в историю
     user_history[user_id].append({"role": "user", "parts": content})
@@ -89,21 +88,28 @@ async def chat(message: types.Message):
         user_history[user_id] = user_history[user_id][-MAX_HISTORY:]
 
     try:
-        # Генерация с историей и поиском
         chat_session = model.start_chat(history=user_history[user_id][:-1])
         response = chat_session.send_message(content[-1] if len(content) == 1 else content)
 
-        text = response.text
+        # Безопасное извлечение текста (фикс краша)
+        try:
+            text = response.text
+        except ValueError:
+            if response.candidates and response.candidates[0].content.parts:
+                text = response.candidates[0].content.parts[0].text
+            else:
+                text = "Google заблокировал ответ по политике безопасности."
 
-        # Добавляем ответ в историю
+        # Сохраняем ответ в историю
         user_history[user_id].append({"role": "model", "parts": [text]})
 
-        # Отправляем
+        # Отправляем пользователю
         for i in range(0, len(text), 4096):
             await message.answer(text[i:i+4096])
 
     except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        await message.answer(f"Ошибка: {str(e)}")
+        user_history[user_id] = []  # сбрасываем при критической ошибке
 
 # === Webhook ===
 async def on_startup(app):
@@ -114,7 +120,6 @@ async def on_startup(app):
 async def on_shutdown(app):
     await bot.delete_webhook()
 
-# === Запуск ===
 if __name__ == "__main__":
     app = web.Application()
 

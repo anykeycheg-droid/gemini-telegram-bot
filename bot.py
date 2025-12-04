@@ -5,10 +5,13 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 import google.generativeai as genai
+import requests  # Для API поиска
 
 # === Конфиг ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
@@ -16,20 +19,35 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# === Память диалога (хранится в оперативке, перезапуск Render — сбрасывается) ===
-user_history = {}  # {user_id: [{"role": "user"/"model", "parts": [...]}, ...]}
+# === Память ===
+user_history = {}
+MAX_HISTORY = 30
 
-MAX_HISTORY = 30  # сколько сообщений хранить (хватит на длинный диалог)
+# === Функция поиска в Google ===
+def search_google(query, num=3):
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "key": GOOGLE_SEARCH_API_KEY,
+        "cx": GOOGLE_CSE_ID,
+        "q": query,
+        "num": num
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        results = response.json().get("items", [])
+        snippets = [f"{item['title']}: {item['snippet']}" for item in results]
+        return "\n".join(snippets)
+    return "Поиск не удался — проверь ключи."
 
 # === Хэндлеры ===
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_id = message.from_user.id
-    user_history[user_id] = []  # очищаем историю при /start
+    user_history[user_id] = []
     await message.answer(
-        "Привет! Я теперь помню весь наш диалог 🧠\n"
-        "Пиши что угодно, присылай фото — я буду помнить контекст!\n\n"
-        "Напиши /clear чтобы очистить память"
+        "Привет! Я теперь с интернет-поиском 🌐\n"
+        "Пиши вопросы с '?' или 'поиск' — найду свежую инфу!\n"
+        "Фото тоже анализирую. /clear — очистить память"
     )
 
 @dp.message(Command("clear"))
@@ -49,42 +67,43 @@ async def chat(message: types.Message):
     # Формируем контент
     content = []
     if message.text or message.caption:
-        content.append(message.text or message.caption or "Опиши это")
+        user_query = message.text or message.caption
+        content.append(user_query)
 
     if message.photo:
         photo = message.photo[-1]
         file = await bot.get_file(photo.file_id)
         photo_bytes = await bot.download_file(file.file_path)
-        content.append({
-            "mime_type": "image/jpeg",
-            "data": photo_bytes.read()
-        })
+        content.append({"mime_type": "image/jpeg", "data": photo_bytes.read()})
 
-    # Добавляем сообщение пользователя в историю
+    # Проверяем, нужен ли поиск
+    search_results = ""
+    if "?" in user_query or any(word in user_query.lower() for word in ["поиск", "новости", "узнай", "кто выиграл", "что такое"]):
+        await message.answer("Ищу в интернете...")
+        search_results = search_google(user_query)
+        content.append(f"Свежие данные из поиска:\n{search_results}")
+
+    # Добавляем в историю
     user_history[user_id].append({"role": "user", "parts": content})
-
-    # Обрезаем историю до MAX_HISTORY
     if len(user_history[user_id]) > MAX_HISTORY:
         user_history[user_id] = user_history[user_id][-MAX_HISTORY:]
 
     try:
-        # Отправляем всю историю
-        chat_session = model.start_chat(history=user_history[user_id][:-1])  # кроме последнего (он уже в content)
+        # Генерация с историей и поиском
+        chat_session = model.start_chat(history=user_history[user_id][:-1])
         response = chat_session.send_message(content[-1] if len(content) == 1 else content)
 
         text = response.text
 
-        # Добавляем ответ модели в историю
+        # Добавляем ответ в историю
         user_history[user_id].append({"role": "model", "parts": [text]})
 
-        # Отправляем ответ (разбиваем если длинный)
+        # Отправляем
         for i in range(0, len(text), 4096):
             await message.answer(text[i:i+4096])
 
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
-        # При ошибке можно сбросить историю
-        user_history[user_id] = []
 
 # === Webhook ===
 async def on_startup(app):

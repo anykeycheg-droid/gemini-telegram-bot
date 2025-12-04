@@ -10,9 +10,9 @@ import google.generativeai as genai
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# === Настройка Gemini (стабильная бесплатная модель) ===
+# === Настройка Gemini (актуальная стабильная модель 2025) ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")  # 15 RPM Free, поддержка фото/текста
+model = genai.GenerativeModel("gemini-2.5-flash")  # ← Стабильная, бесплатная, мультимодальная
 
 # === Бот ===
 bot = Bot(token=BOT_TOKEN)
@@ -21,9 +21,9 @@ dp = Dispatcher()
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
-        "Привет! Я бот на Gemini 1.5 Flash (Free Tier)\n"
+        "Привет! Я бот на Gemini 2.5 Flash (декабрь 2025)\n"
         "Пиши текст, присылай фото — отвечу!\n"
-        "Лимит: 15 запросов/мин, 1500/день"
+        "Лимит Free: 15 запросов/мин"
     )
 
 @dp.message()

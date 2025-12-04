@@ -3,7 +3,7 @@ import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler  # Только это — без aiohttp_server
 import google.generativeai as genai
 
 # === Конфиг ===
@@ -56,7 +56,7 @@ async def on_shutdown(app):
 if __name__ == "__main__":
     app = web.Application()
 
-    # Правильная регистрация webhook (без aiohttp_server)
+    # Правильная регистрация webhook (по docs.aiogram.dev v3.13)
     webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_handler.register(app, path="/webhook")
 

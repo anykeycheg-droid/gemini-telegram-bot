@@ -3,7 +3,7 @@ import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, aiohttp_server
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 import google.generativeai as genai
 
 # === Конфиг ===
@@ -11,7 +11,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")   # ← актуальная и бесплатная
+model = genai.GenerativeModel("gemini-2.5-flash")  # Актуальная бесплатная модель 2025
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -43,7 +43,7 @@ async def echo(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
 
-# === Запуск webhook ===
+# === Webhook ===
 async def on_startup(app):
     webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
     await bot.set_webhook(webhook_url)
@@ -52,22 +52,22 @@ async def on_startup(app):
 async def on_shutdown(app):
     await bot.delete_webhook()
 
-def main():
+# === Запуск ===
+if __name__ == "__main__":
     app = web.Application()
-    
-    # Правильная регистрация webhook в aiogram 3.13+
+
+    # Правильная регистрация webhook (без aiohttp_server)
     webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_handler.register(app, path="/webhook")
-    
+
+    # Health-check для Render (открывает порт)
+    async def health(request):
+        return web.Response(text="Bot alive!")
+    app.router.add_get("/", health)
+
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
-    
-    # Health-check для Render
-    app.router.add_get("/", lambda _: web.Response(text="Bot alive"))
-    
+
     port = int(os.getenv("PORT", 10000))
     logging.basicConfig(level=logging.INFO)
-    aiohttp_server(app, port=port)
-
-if __name__ == "__main__":
-    main()
+    web.run_app(app, host="0.0.0.0", port=port)

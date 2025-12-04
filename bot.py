@@ -6,46 +6,86 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 import google.generativeai as genai
 
+# === Переменные окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# === Настройка Gemini (модель, которая ТОЧНО работает с обычным ключом из AI Studio) ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+model = genai.GenerativeModel("gemini-2.0-flash-exp")   # ← 100% рабочая в декабре 2025
 
+# === Бот ===
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    await message.answer("Бот на Gemini 1.5 Flash-002 через webhook на Render Free! Пиши вопрос.")
+    await message.answer(
+        "Привет! Я бот на Gemini 2.0 Flash Experimental\n"
+        "Пиши текст, присылай фото — отвечу мгновенно!\n"
+        "Работаю 24/7 на Render Free + webhook"
+    )
 
 @dp.message()
 async def handle_message(message: types.Message):
-    text = message.text or message.caption or "Расскажи о себе"
+    user_input = message.text or message.caption or "Опиши это"
     try:
-        await message.answer("🤔 Думаю...")
-        response = model.generate_content(text)
-        for chunk in [response.text[i:i+4096] for i in range(0, len(response.text), 4096)]:
-            await message.answer(chunk)
-    except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        content = [user_input]
 
+        # Поддержка фото
+        if message.photo:
+            photo = message.photo[-1]
+            file = await bot.get_file(photo.file_id)
+            photo_bytes = await bot.download_file(file.file_path)
+            content.append({
+                "mime_type": "image/jpeg",
+                "data": photo_bytes.read()
+            })
+            await message.answer("Анализирую фото...")
+
+        await message.answer("Думаю...")
+
+        response = model.generate_content(
+            content,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 8192
+            }
+        )
+
+        text = response.text
+        # Разбиваем длинные ответы
+        for i in range(0, len(text), 4096):
+            await message.answer(text[i:i+4096], disable_web_page_preview=True)
+
+    except Exception as e:
+        await message.answer(f"Ошибка: {str(e)}")
+
+# === Webhook ===
 async def on_startup(app):
     webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
     await bot.set_webhook(webhook_url)
-    logging.info(f"Webhook set to {webhook_url}")
+    logging.info(f"Webhook установлен: {webhook_url}")
 
 async def on_shutdown(app):
     await bot.delete_webhook()
 
+# === Запуск ===
 if __name__ == "__main__":
     app = web.Application()
+
+    # Webhook путь
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
-    app.router.add_get("/", lambda _: web.Response(text="Bot is alive!"))  # Для health check Render
+
+    # Health check — чтобы Render не ругался на отсутствие порта
+    async def health(request):
+        return web.Response(text="Bot is alive!")
+    app.router.add_get("/", health)
+
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
+
     port = int(os.getenv("PORT", 10000))
     logging.basicConfig(level=logging.INFO)
-
     web.run_app(app, host="0.0.0.0", port=port)

@@ -1,67 +1,49 @@
 import os
 import logging
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, aiohttp_server
 import google.generativeai as genai
 
-# === Переменные окружения ===
+# === Конфиг ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# === Настройка Gemini (актуальная стабильная модель 2025) ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")  # ← Стабильная, бесплатная, мультимодальная (замена 1.5-flash)
+model = genai.GenerativeModel("gemini-2.5-flash")   # ← актуальная и бесплатная
 
-# === Бот ===
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# === Хэндлеры ===
 @dp.message(Command("start"))
-async def start_handler(message: types.Message):
-    await message.answer(
-        "Привет! Я бот на Gemini 2.5 Flash (декабрь 2025)\n"
-        "Пиши текст, присылай фото — отвечу!\n"
-        "Лимит Free: 15 запросов/мин"
-    )
+async def start(message: types.Message):
+    await message.answer("Бот жив! Gemini 2.5 Flash работает на Render Free 24/7")
 
 @dp.message()
-async def handle_message(message: types.Message):
-    user_input = message.text or message.caption or "Опиши это"
+async def echo(message: types.Message):
     try:
-        content = [user_input]
+        await message.answer("Думаю...")
+        user_text = message.text or message.caption or "Опиши это"
 
-        # Поддержка фото
+        content = [user_text]
         if message.photo:
             photo = message.photo[-1]
             file = await bot.get_file(photo.file_id)
             photo_bytes = await bot.download_file(file.file_path)
-            content.append({
-                "mime_type": "image/jpeg",
-                "data": photo_bytes.read()
-            })
-            await message.answer("Анализирую фото...")
+            content.append({"mime_type": "image/jpeg", "data": photo_bytes.read()})
 
-        await message.answer("Думаю...")
-
-        response = model.generate_content(
-            content,
-            generation_config={
-                "temperature": 0.7,
-                "max_output_tokens": 8192
-            }
-        )
-
+        response = model.generate_content(content)
         text = response.text
-        # Разбиваем длинные ответы
+
         for i in range(0, len(text), 4096):
-            await message.answer(text[i:i+4096], disable_web_page_preview=True)
+            await message.answer(text[i:i+4096])
 
     except Exception as e:
-        await message.answer(f"Ошибка: {str(e)}")
+        await message.answer(f"Ошибка: {e}")
 
-# === Webhook ===
+# === Запуск webhook ===
 async def on_startup(app):
     webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
     await bot.set_webhook(webhook_url)
@@ -70,22 +52,22 @@ async def on_startup(app):
 async def on_shutdown(app):
     await bot.delete_webhook()
 
-# === Запуск ===
-if __name__ == "__main__":
+def main():
     app = web.Application()
-
-    # Webhook путь
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
-    setup_application(app, dp, bot=bot)
-
-    # Health check для Render
-    async def health(request):
-        return web.Response(text="Bot is alive!")
-    app.router.add_get("/", health)
-
+    
+    # Правильная регистрация webhook в aiogram 3.13+
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_handler.register(app, path="/webhook")
+    
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
-
+    
+    # Health-check для Render
+    app.router.add_get("/", lambda _: web.Response(text="Bot alive"))
+    
     port = int(os.getenv("PORT", 10000))
     logging.basicConfig(level=logging.INFO)
-    web.run_app(app, host="0.0.0.0", port=port)
+    aiohttp_server(app, port=port)
+
+if __name__ == "__main__":
+    main()

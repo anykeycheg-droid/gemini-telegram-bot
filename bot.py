@@ -10,9 +10,9 @@ import google.generativeai as genai
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# === Настройка Gemini (модель, которая ТОЧНО работает с обычным ключом из AI Studio) ===
+# === Настройка Gemini (стабильная бесплатная модель) ===
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash-exp")   # ← 100% рабочая в декабре 2025
+model = genai.GenerativeModel("gemini-1.5-flash")  # 15 RPM Free, поддержка фото/текста
 
 # === Бот ===
 bot = Bot(token=BOT_TOKEN)
@@ -21,9 +21,9 @@ dp = Dispatcher()
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
-        "Привет! Я бот на Gemini 2.0 Flash Experimental\n"
-        "Пиши текст, присылай фото — отвечу мгновенно!\n"
-        "Работаю 24/7 на Render Free + webhook"
+        "Привет! Я бот на Gemini 1.5 Flash (Free Tier)\n"
+        "Пиши текст, присылай фото — отвечу!\n"
+        "Лимит: 15 запросов/мин, 1500/день"
     )
 
 @dp.message()
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
 
-    # Health check — чтобы Render не ругался на отсутствие порта
+    # Health check для Render
     async def health(request):
         return web.Response(text="Bot is alive!")
     app.router.add_get("/", health)

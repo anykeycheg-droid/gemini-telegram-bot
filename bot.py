@@ -10,7 +10,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash-002")
+model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -47,4 +47,5 @@ if __name__ == "__main__":
     app.on_shutdown.append(on_shutdown)
     port = int(os.getenv("PORT", 10000))
     logging.basicConfig(level=logging.INFO)
+
     web.run_app(app, host="0.0.0.0", port=port)

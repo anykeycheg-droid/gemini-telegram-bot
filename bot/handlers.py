@@ -8,7 +8,7 @@ import asyncio
 router = Router()
 
 
-@# Замени только эти две функции:
+# Замени только эти две функции:
 @router.message(Command("start"))
 async def start(m: types.Message):
     from .history import clear_history

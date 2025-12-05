@@ -1,13 +1,21 @@
+# history.py — финальная версия с защитой от кривого REDIS_URL
 import asyncio
 import pickle
 import os
 from typing import List, Any
 
-import redis.asyncio as aioredis  # встроенный в redis >=4.2
+import redis.asyncio as aioredis
 
 REDIS_URL = os.getenv("REDIS_URL")
+
 if not REDIS_URL:
-    raise RuntimeError("REDIS_URL не указан в переменных окружения!")
+    raise RuntimeError("Переменная REDIS_URL не найдена в настройках Render!")
+
+# Принудительно делаем rediss:// если забыли
+if REDIS_URL.startswith("redis://"):
+    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
+elif not REDIS_URL.startswith(("rediss://", "redis+unix://")):
+    REDIS_URL = "rediss://" + REDIS_URL.lstrip("/")
 
 redis = aioredis.from_url(
     REDIS_URL,

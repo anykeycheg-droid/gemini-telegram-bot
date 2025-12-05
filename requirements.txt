@@ -1,6 +1,6 @@
 aiogram==3.4.1
 aiohttp==3.9.1
-google-generativeai==0.7.2
+google-genai>=0.10.0  # новая SDK с system_instruction
 pydantic==2.5.2
 pydantic-settings==2.2.0
 gunicorn==21.2.0

@@ -1,41 +1,55 @@
-import aiohttp
 import google.generativeai as genai
 import asyncio
-from typing import List
+from typing import List, Dict, Any
 from .config import settings
-from tenacity import retry, wait_fixed, stop_after_attempt
+from tenacity import retry, wait_exponential, stop_after_attempt
+import logging
 
+log = logging.getLogger(__name__)
+
+# Настраиваем Gemini
 genai.configure(api_key=settings.gemini_api_key.get_secret_value())
-gemini_model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-async def google_search(query: str, num: int = 3) -> str:
-    if not settings.google_api_key or not settings.google_cse_id:
-        return ""   # ничего не добавляем, если нет ключей
-    params = {
-        "key": settings.google_api_key,
-        "cx": settings.google_cse_id,
-        "q": query,
-        "num": num,
-    }
+# Основная модель для ответов
+main_model = genai.GenerativeModel(
+    "gemini-1.5-flash",
+    system_instruction="Ты — полезный и остроумный помощник в Telegram. Отвечай на русском языке, кратко и по делу."
+)
+
+# Лёгкая модель только для решения: нужен ли поиск?
+search_decision_model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Семфор для ограничения одновременных запросов к Gemini (чтобы не словить 429)
+GEMINI_SEMAPHORE = asyncio.Semaphore(8)
+
+
+async def should_use_search(user_message: str) -> bool:
+    """Спрашиваем у самой модели — нужен ли поиск в интернете"""
+    prompt = f"""Ответь только YES или NO.
+Нужно ли искать актуальную информацию в интернете (новости, погода, курсы валют, цены, события после 2024 года) 
+для точного ответа на вопрос:
+
+"{user_message}"
+
+Ответ: """
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=7)) as s:
-            async with s.get("https://www.googleapis.com/customsearch/v1", params=params) as r:
-                if r.status != 200:
-                    return "Поиск временно недоступен."
-                items = (await r.json()).get("items", [])
-                return "\n\n".join(f"{i+1}. {it['title']}\n{it['snippet']}" for i, it in enumerate(items))
-    except Exception:
-        return "Поиск временно недоступен."
+        async with GEMINI_SEMAPHORE:
+            response = await search_decision_model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.0, "max_output_tokens": 5}
+            )
+            return "YES" in response.text.strip().upper()
+    except Exception as e:
+        log.warning(f"Ошибка при решении о поиске: {e}")
+        return False
 
-def gemini_should_search(text: str) -> bool:
-    t = text.lower()
-    return (len(text) > 15 and "?" in t) or any(k in t for k in ("поиск", "новости", "узнай", "погода", "курс", "цена"))
 
-@retry(wait=wait_fixed(8), stop=stop_after_attempt(3))
-async def gemini_reply(history: list, parts) -> str:
-    chat = gemini_model.start_chat(history=history)
-    loop = asyncio.get_running_loop()
-    response = await loop.run_in_executor(None, chat.send_message, parts)
-    if not response.candidates:
-        return "Google заблокировал ответ по политике безопасности."
-    return response.text
+@retry(wait=wait_exponential(multiplier=1, min=4, max=15), stop=stop_after_attempt(4))
+async def gemini_reply(history: List[Dict[str, Any]]) -> str:
+    """Генерируем ответ с историей (история уже содержит последнее сообщение пользователя)"""
+    async with GEMINI_SEMAPHORE:
+        chat = main_model.start_chat(history=history[-40:])  # 20 пар ≈ 40 сообщений
+        response = await chat.send_message_async("")
+        if not response.candidates:
+            return "Извини, Google заблокировал ответ по правилам безопасности."
+        return response.text

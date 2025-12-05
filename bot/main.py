@@ -1,4 +1,3 @@
-# main.py — окончательная версия, работает на Render без ошибок
 import os
 import logging
 from aiohttp import web
@@ -33,8 +32,7 @@ async def on_shutdown(app: web.Application):
     await bot.session.close()
 
 
-# ← ВОТ ЭТА СТРОКА САМАЯ ВАЖНАЯ
-def create_app(argv=None) -> web.Application:   # ← argv=None обязателен!
+def create_app(argv=None) -> web.Application:
     app = web.Application()
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
     app.router.add_get("/", health)

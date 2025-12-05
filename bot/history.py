@@ -1,4 +1,3 @@
-# history.py — финальная версия с защитой от кривого REDIS_URL
 import asyncio
 import pickle
 import os
@@ -11,16 +10,11 @@ REDIS_URL = os.getenv("REDIS_URL")
 if not REDIS_URL:
     raise RuntimeError("Переменная REDIS_URL не найдена в настройках Render!")
 
-# Принудительно делаем rediss:// если забыли
-if REDIS_URL.startswith("redis://"):
-    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
-elif not REDIS_URL.startswith(("rediss://", "redis+unix://")):
-    REDIS_URL = "rediss://" + REDIS_URL.lstrip("/")
-
+# Для Upstash с TLS — используем ssl_cert_reqs=None (не проверяем сертификат)
 redis = aioredis.from_url(
     REDIS_URL,
     decode_responses=False,
-    ssl=REDIS_URL.startswith("rediss://")
+    ssl_cert_reqs=None  # ← Это решает проблему с 'ssl' keyword
 )
 
 _memory_cache: dict[int, List[Any]] = {}

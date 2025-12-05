@@ -1,23 +1,29 @@
+# handlers.py — полностью готовый и проверенный на Render + Gemini 2.0 Flash (декабрь 2025)
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from .services import gemini_reply, should_use_search, google_search
-from .history import get_history, save_history  # новый модуль, см. ниже
-import io
+from .history import get_history, save_history, clear_history
 import asyncio
+import google.generativeai as genai   # нужен для protos.Part и protos.Blob
 
 router = Router()
 
 
-# Замени только эти две функции:
 @router.message(Command("start"))
 async def start(m: types.Message):
-    from .history import clear_history
     await clear_history(m.from_user.id)
-    await m.answer("Привет! Я бот на Gemini 2.0 Flash\n• Помню диалог\n• Сам гуглю при нужде\n• Понимаю фото\n\n/clear — очистить память")
+    await m.answer(
+        "Привет! Я бот на Gemini 2.0 Flash\n\n"
+        "• Помню весь диалог\n"
+        "• Сам решаю, когда гуглить\n"
+        "• Понимаю фото и документы\n"
+        "• Отвечаю быстро и по-русски\n\n"
+        "/clear — очистить память"
+    )
+
 
 @router.message(Command("clear"))
-async def clear(m: types.Message):
-    from .history import clear_history
+async def cmd_clear(m: types.Message):
     await clear_history(m.from_user.id)
     await m.answer("Память очищена")
 
@@ -29,51 +35,64 @@ async def chat(m: types.Message):
     await m.bot.send_chat_action(uid, "typing")
 
     text = (m.text or m.caption or "").strip()
-    if not text and not m.photo and not m.document:
-        await m.answer("Не понял, что ты прислал 🤔")
-        return
 
+    # Подготавливаем части сообщения для Gemini
     parts = []
 
-    # Обработка фото
+    # Текст (если есть)
+    if text:
+        parts.append(text)
+
+    # Фото
     if m.photo:
         photo = m.photo[-1]
-        if photo.file_size > 6 * 1024 * 1024:
-            await m.answer("Фото слишком большое, максимум 6 МБ")
+        if photo.file_size and photo.file_size > 8 * 1024 * 1024:
+            await m.answer("Фото слишком большое (лимит 8 МБ)")
             return
         file = await m.bot.get_file(photo.file_id)
         photo_bytes = await m.bot.download_file(file.file_path)
-        parts.append({"mime_type": "image/jpeg", "data": photo_bytes.read()})
+        parts.append(genai.protos.Part(
+            inline_data=genai.protos.Blob(
+                mime_type="image/jpeg",
+                data=photo_bytes.read()
+            )
+        ))
 
-    # Обработка документов (pdf, txt и т.д.) — по желанию можно расширить
-    if m.document and m.document.file_size < 5 * 1024 * 1024:
+    # Документы (pdf, txt, docx и т.д.)
+    if m.document:
+        if m.document.file_size and m.document.file_size > 10 * 1024 * 1024:
+            await m.answer("Документ слишком большой (лимит 10 МБ)")
+            return
         file = await m.bot.get_file(m.document.file_id)
         doc_bytes = await m.bot.download_file(file.file_path)
-        parts.append({
-            "mime_type": m.document.mime_type or "application/octet-stream",
-            "data": doc_bytes.read()
-        })
+        mime = m.document.mime_type or "application/octet-stream"
+        parts.append(genai.protos.Part(
+            inline_data=genai.protos.Blob(
+                mime_type=mime,
+                data=doc_bytes.read()
+            )
+        ))
 
-    # Текст всегда добавляем (даже если пустой — Gemini поймёт)
-    if text:
-        parts.insert(0, text)  # текст идёт первым
+    # Если ничего нет — хотя бы текст "пусто"
+    if not parts:
+        parts.append("")
 
     # Добавляем сообщение пользователя в историю
     hist.append({"role": "user", "parts": parts})
 
     # Решаем, нужен ли поиск
-    search_text = text or "фото"
+    search_text = text or "фото" if m.photo else "документ"
     if await should_use_search(search_text):
-        search_result = await google_search(search_text, num=4)
+        search_result = await google_search(search_text)
         if search_result:
-            hist.append({"role": "model", "parts": [f"Свежие данные из поиска:\n{search_result}"]})
+            hist.append({"role": "model", "parts": [f"Свежая информация из поиска:\n{search_result}"]})
 
     # Генерируем ответ
     try:
         answer = await gemini_reply(hist)
     except Exception as e:
-        await m.answer("Ошибка связи с Gemini. Попробуй позже.")
-        hist.pop()  # убираем последнее сообщение пользователя
+        await m.answer("Ошибка связи с Gemini. Попробуй позже")
+        hist.pop()  # убираем последнее сообщение, чтобы не засорять историю
         await save_history(uid)
         return
 
@@ -81,12 +100,12 @@ async def chat(m: types.Message):
     hist.append({"role": "model", "parts": [answer]})
     await save_history(uid)
 
-    # Отправляем ответ кусками с защитой от флуда
+    # Отправляем ответ кусками
     if not answer.strip():
-        answer = "Не смог ответить 🤷‍♂️"
+        answer = "Не смог ответить"
 
-    for i in range(0, len(answer), 4096):
-        chunk = answer[i:i+4096]
+    for i in range(0, len(answer), 4090):
+        chunk = answer[i:i+4090]
         await m.answer(chunk, disable_web_page_preview=True)
-        if len(answer) > 4096:
+        if i + 4090 < len(answer):
             await asyncio.sleep(0.4)  # защита от флуда

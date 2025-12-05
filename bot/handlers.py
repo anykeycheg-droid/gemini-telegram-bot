@@ -2,7 +2,6 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 from .services import gemini_reply, should_use_search, google_search
 from .history import get_history, save_history, clear_history
-import io
 import asyncio
 
 router = Router()

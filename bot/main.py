@@ -29,7 +29,6 @@ async def on_shutdown(_):
     await bot.session.close()
 
 def create_app(argv=None) -> web.Application:
-    # argv игнорируем, но принимаем
     app = web.Application()
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
     app.router.add_get("/", health)

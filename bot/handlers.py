@@ -27,17 +27,25 @@ async def chat(m: types.Message):
     await m.bot.send_chat_action(uid, "typing")
     text = m.text or m.caption or ""
     parts = [text]
+
     if m.photo:
         photo = m.photo[-1]
         file = await m.bot.get_file(photo.file_id)
         photo_bytes: io.BytesIO = await m.bot.download_file(file.file_path)
         parts.append({"mime_type": "image/jpeg", "data": photo_bytes.read()})
+
     if gemini_should_search(text):
-        parts.append(f"Свежая информация из Google:\n{await google_search(text)}")
+        search_res = await google_search(text)
+        if search_res:                      # добавляем только если есть результат
+            parts.append(f"Свежая информация из Google:\n{search_res}")
+
     hist.append({"role": "user", "parts": parts})
     if len(hist) > settings.max_history * 2:
         hist[:] = hist[-settings.max_history * 2 :]
+
     answer = await gemini_reply(hist[:-1], parts[-1])
     hist.append({"role": "model", "parts": [answer]})
-    for chunk in (answer[i : i + 4096] for i in range(0, len(answer), 4096)):
-        await m.answer(chunk)
+
+    if answer:                              # не шлём пустые части
+        for chunk in (answer[i : i + 4096] for i in range(0, len(answer), 4096)):
+            await m.answer(chunk)

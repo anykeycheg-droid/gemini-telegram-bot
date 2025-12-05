@@ -1,3 +1,4 @@
+# services.py — финальная рабочая версия (google-genai >= 0.10.0 + aiohttp)
 import asyncio
 import logging
 import aiohttp
@@ -11,23 +12,26 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-genai.configure(api_key=settings.gemini_api_key.get_secret_value())
+# Один клиент на всё приложение
+client = genai.Client(api_key=settings.gemini_api_key.get_secret_value())
 
-model = genai.GenerativeModel(
-    "gemini-2.0-flash",
-    system_instruction="Ты — остроумный, дружелюбный помощник в Telegram. Отвечай кратко, по-русски, с лёгким юмором."
-)
+# Модели
+MAIN_MODEL = "gemini-2.0-flash"
+SEARCH_MODEL = "gemini-2.0-flash"
 
-search_model = genai.GenerativeModel("gemini-2.0-flash")
 SEM = asyncio.Semaphore(10)
 
 
 async def should_use_search(text: str) -> bool:
-    prompt = f"Ответь только YES или NO: нужно ли гуглить?\n\n{text}"
+    prompt = f"Ответь только YES или NO: нужно ли гуглить для ответа?\n\n{text}"
     try:
         async with SEM:
-            r = await search_model.generate_content_async(prompt, generation_config=GenerationConfig(temperature=0))
-            return "YES" in r.text.strip().upper()
+            resp = await client.generate_content_async(
+                model=SEARCH_MODEL,
+                contents=prompt,
+                generation_config=GenerationConfig(temperature=0, max_output_tokens=5)
+            )
+            return "YES" in resp.text.strip().upper()
     except Exception as e:
         log.warning(f"Search decision error: {e}")
         return False
@@ -36,7 +40,12 @@ async def should_use_search(text: str) -> bool:
 async def google_search(query: str, num: int = 4) -> str:
     if not settings.google_search_api_key or not settings.google_cse_id:
         return ""
-    params = {"key": settings.google_search_api_key, "cx": settings.google_cse_id, "q": query, "num": num}
+    params = {
+        "key": settings.google_search_api_key,
+        "cx": settings.google_cse_id,
+        "q": query,
+        "num": num
+    }
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get("https://www.googleapis.com/customsearch/v1", params=params) as r:
@@ -44,7 +53,10 @@ async def google_search(query: str, num: int = 4) -> str:
                     return ""
                 data = await r.json()
                 items = data.get("items", [])[:num]
-                return "\n\n".join(f"{i+1}. {it.get('title','')}\n{it.get('snippet','')}" for i, it in enumerate(items, 1))
+                return "\n\n".join(
+                    f"{i+1}. {it.get('title', '')}\n{it.get('snippet', '')}"
+                    for i, it in enumerate(items, 1)
+                )
     except Exception as e:
         log.warning(f"Google search error: {e}")
         return ""
@@ -53,10 +65,21 @@ async def google_search(query: str, num: int = 4) -> str:
 @retry(wait=wait_exponential(multiplier=1, min=4, max=12), stop=stop_after_attempt(4))
 async def gemini_reply(history: List[Dict[str, Any]]) -> str:
     async with SEM:
-        chat = model.start_chat(history=history[-40:])
+        # Добавляем системный промпт в начало истории
+        system_prompt = "Ты — остроумный, дружелюбный помощник в Telegram. Отвечай кратко, по-русски, с лёгким юмором когда уместно."
+        full_history = [{"role": "model", "parts": [system_prompt]}]
+
+        for msg in history[-40:]:
+            role = "user" if msg["role"] == "user" else "model"
+            full_history.append({"role": role, "parts": msg["parts"]})
+
         try:
-            response = await chat.send_message_async("")
+            response = await client.generate_content_async(
+                model=MAIN_MODEL,
+                contents=full_history,
+                generation_config=GenerationConfig(temperature=0.8)
+            )
             return response.text or "Не смог ответить"
         except Exception as e:
             log.exception(f"Gemini error: {e}")
-            return "Ошибка связи с Gemini"
+            return "Ошибка связи с Gemini, попробуй позже"

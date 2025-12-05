@@ -1,3 +1,4 @@
+# handlers.py — финальная рабочая версия
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from .services import gemini_reply, should_use_search, google_search
@@ -13,7 +14,7 @@ async def start(m: types.Message):
     await clear_history(m.from_user.id)
     await m.answer(
         "Привет! Я бот на Gemini 2.0 Flash\n\n"
-        "• Помню диалог\n"
+        "• Помню весь диалог\n"
         "• Сам гуглю когда нужно\n"
         "• Понимаю фото и документы\n\n"
         "/clear — очистить память"
@@ -61,14 +62,25 @@ async def chat(m: types.Message):
 
     hist.append({"role": "user", "parts": parts})
 
-    if await should_use_search(text or "фото"):
-        search = await google_search(text or "фото")
+    search_query = text or ("фото" if m.photo else "документ")
+    if await should_use_search(search_query):
+        search = await google_search(search_query)
         if search:
             hist.append({"role": "model", "parts": [f"Свежие данные:\n{search}"]})
 
-    answer = await gemini_reply(hist)
+    try:
+        answer = await gemini_reply(hist)
+    except Exception:
+        await m.answer("Ошибка связи с Gemini, попробуй позже")
+        hist.pop()
+        await save_history(uid)
+        return
+
     hist.append({"role": "model", "parts": [answer]})
     await save_history(uid)
+
+    if not answer.strip():
+        answer = "Не знаю, что сказать"
 
     for i in range(0, len(answer), 4090):
         await m.answer(answer[i:i+4090], disable_web_page_preview=True)

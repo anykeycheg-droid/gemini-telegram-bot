@@ -1,8 +1,7 @@
 aiogram==3.4.1
 aiohttp==3.9.1
-google-genai>=0.10.0  # новая SDK с system_instruction
+google-genai>=0.10.0
 pydantic==2.5.2
 pydantic-settings==2.2.0
-gunicorn==21.2.0
 tenacity==8.0.1
 aioredis>=2.0.0

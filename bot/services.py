@@ -67,6 +67,34 @@ async def should_use_search(user_message: str) -> bool:
         log.warning(f"Ошибка при решении о поиске: {e}")
         return False
 
+async def google_search(query: str, num: int = 4) -> str:
+    """Опциональный поиск в Google через Custom Search JSON API"""
+    if not settings.google_search_api_key or not settings.google_cse_id:
+        return ""
+
+    params = {
+        "key": settings.google_search_api_key,
+        "cx": settings.google_cse_id,
+        "q": query,
+        "num": num,
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.get("https://www.googleapis.com/customsearch/v1", params=params) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+                items = data.get("items", [])
+                snippets = []
+                for i, item in enumerate(items[:num], 1):
+                    title = item.get("title", "")
+                    snippet = item.get("snippet", "")
+                    snippets.append(f"{i}. {title}\n{snippet}")
+                return "\n\n".join(snippets) if snippets else ""
+    except Exception as e:
+        log.warning(f"Google search error: {e}")
+        return ""
+        
 @retry(wait=wait_exponential(multiplier=1, min=4, max=15), stop=stop_after_attempt(4))
 async def gemini_reply(history: List[Dict[str, Any]]) -> str:
     """Генерируем ответ с историей (история уже содержит последнее сообщение пользователя)"""

@@ -5,7 +5,7 @@ from typing import List
 from .config import settings
 
 genai.configure(api_key=settings.gemini_api_key.get_secret_value())
-gemini_model = genai.GenerativeModel("gemini-pro")
+gemini_model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
 async def google_search(query: str, num: int = 3) -> str:
     if not settings.google_api_key or not settings.google_cse_id:

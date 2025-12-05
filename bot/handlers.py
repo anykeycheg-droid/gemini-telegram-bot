@@ -8,23 +8,17 @@ import asyncio
 router = Router()
 
 
+@# Замени только эти две функции:
 @router.message(Command("start"))
 async def start(m: types.Message):
-    await get_history(m.from_user.id).clear()
-    await save_history(m.from_user.id)
-    await m.answer(
-        "Привет! Я бот на Gemini 1.5 Flash ⚡\n\n"
-        "• Помню весь диалог\n"
-        "• Сам решаю, когда искать в Google\n"
-        "• Понимаю фото и документы\n\n"
-        "/clear — очистить память"
-    )
-
+    from .history import clear_history
+    await clear_history(m.from_user.id)
+    await m.answer("Привет! Я бот на Gemini 2.0 Flash\n• Помню диалог\n• Сам гуглю при нужде\n• Понимаю фото\n\n/clear — очистить память")
 
 @router.message(Command("clear"))
 async def clear(m: types.Message):
-    await get_history(m.from_user.id).clear()
-    await save_history(m.from_user.id)
+    from .history import clear_history
+    await clear_history(m.from_user.id)
     await m.answer("Память очищена")
 
 

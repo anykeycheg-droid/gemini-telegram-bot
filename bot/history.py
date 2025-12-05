@@ -3,7 +3,7 @@ import pickle
 import os
 from typing import List, Any
 
-import aioredis
+import redis.asyncio as aioredis  # встроенный в redis >=4.2
 
 REDIS_URL = os.getenv("REDIS_URL")
 if not REDIS_URL:

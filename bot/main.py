@@ -26,6 +26,7 @@ async def on_startup(app: web.Application):
 
 async def on_shutdown(_):
     await bot.delete_webhook()
+    await bot.session.close()
 
 def create_app(argv=None) -> web.Application:
     # argv игнорируем, но принимаем
